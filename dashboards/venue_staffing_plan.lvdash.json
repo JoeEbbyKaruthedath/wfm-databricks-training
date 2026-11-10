@@ -18,6 +18,11 @@
           "displayName": "Staff-hours above need",
           "description": "Scheduled minus needed staff-hours",
           "expression": "SUM(`scheduled_staff`) - SUM(`required_staff`)"
+        },
+        {
+          "displayName": "day",
+          "description": "Date as text, without time, for the Day filter",
+          "expression": "date_format(`date`, 'yyyy-MM-dd (EEE)')"
         }
       ]
     },
@@ -29,7 +34,8 @@
         "       s.shift_start, s.shift_end, s.shift_hours, s.staff_count,\n",
         "       s.staff_count * s.shift_hours AS staff_hours,\n",
         "       CONCAT(LPAD(CAST(s.shift_start AS STRING), 2, '0'), ':00') AS start_time,\n",
-        "       CONCAT(LPAD(CAST(s.shift_end AS STRING), 2, '0'), ':00') AS end_time\n",
+        "       CONCAT(LPAD(CAST(s.shift_end AS STRING), 2, '0'), ':00') AS end_time,\n",
+        "       date_format(s.date, 'yyyy-MM-dd (EEE)') AS day\n",
         "FROM venue_staff_schedule s\n",
         "JOIN venues v ON v.venue_id = s.venue_id\n"
       ]
@@ -69,8 +75,6 @@
     {
       "name": "staffing_plan",
       "displayName": "Staffing plan",
-      "pageType": "PAGE_TYPE_CANVAS",
-      "layoutVersion": "GRID_V1",
       "layout": [
         {
           "widget": {
@@ -84,7 +88,7 @@
           "position": {
             "x": 0,
             "y": 0,
-            "width": 12,
+            "width": 9,
             "height": 1
           }
         },
@@ -100,7 +104,7 @@
           "position": {
             "x": 0,
             "y": 1,
-            "width": 12,
+            "width": 9,
             "height": 1
           }
         },
@@ -109,26 +113,34 @@
             "name": "day_filter",
             "queries": [
               {
-                "name": "day_filter_ds_coverage",
+                "name": "dashboards/01f1dcbf40ee16c683d60ad787033341/datasets/01f1dccef2861f6d83e614e81e902112_day",
                 "query": {
                   "datasetName": "ds_coverage",
                   "fields": [
                     {
-                      "name": "date",
-                      "expression": "`date`"
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "day_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
                     }
                   ],
                   "disaggregated": false
                 }
               },
               {
-                "name": "day_filter_ds_shifts",
+                "name": "dashboards/01f1dcbf40ee16c683d60ad787033341/datasets/01f1dccef2861f729cd19aeba5a747b8_day",
                 "query": {
                   "datasetName": "ds_shifts",
                   "fields": [
                     {
-                      "name": "date",
-                      "expression": "`date`"
+                      "name": "day",
+                      "expression": "`day`"
+                    },
+                    {
+                      "name": "day_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
                     }
                   ],
                   "disaggregated": false
@@ -137,47 +149,29 @@
             ],
             "spec": {
               "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": "Day"
+              },
               "widgetType": "filter-multi-select",
               "encodings": {
                 "fields": [
                   {
-                    "fieldName": "date",
-                    "displayName": "Day",
-                    "queryName": "day_filter_ds_coverage"
+                    "fieldName": "day",
+                    "queryName": "dashboards/01f1dcbf40ee16c683d60ad787033341/datasets/01f1dccef2861f6d83e614e81e902112_day"
                   },
                   {
-                    "fieldName": "date",
-                    "displayName": "Day",
-                    "queryName": "day_filter_ds_shifts"
+                    "fieldName": "day",
+                    "queryName": "dashboards/01f1dcbf40ee16c683d60ad787033341/datasets/01f1dccef2861f729cd19aeba5a747b8_day"
                   }
                 ]
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Day"
               }
             }
           },
           "position": {
-            "x": 0,
-            "y": 2,
+            "x": 9,
+            "y": 0,
             "width": 3,
-            "height": 2
-          }
-        },
-        {
-          "widget": {
-            "name": "day_hint",
-            "multilineTextboxSpec": {
-              "lines": [
-                "Pick one or more days to focus the plan, or leave it blank for the whole week. Park, venue type and venue filters are in the filter panel.\n"
-              ]
-            }
-          },
-          "position": {
-            "x": 3,
-            "y": 2,
-            "width": 9,
             "height": 2
           }
         },
@@ -230,7 +224,7 @@
           },
           "position": {
             "x": 0,
-            "y": 4,
+            "y": 2,
             "width": 3,
             "height": 3
           }
@@ -284,7 +278,7 @@
           },
           "position": {
             "x": 3,
-            "y": 4,
+            "y": 2,
             "width": 3,
             "height": 3
           }
@@ -340,7 +334,7 @@
           },
           "position": {
             "x": 6,
-            "y": 4,
+            "y": 2,
             "width": 3,
             "height": 3
           }
@@ -396,7 +390,7 @@
           },
           "position": {
             "x": 9,
-            "y": 4,
+            "y": 2,
             "width": 3,
             "height": 3
           }
@@ -482,7 +476,7 @@
           },
           "position": {
             "x": 0,
-            "y": 7,
+            "y": 5,
             "width": 6,
             "height": 6
           }
@@ -547,7 +541,7 @@
           },
           "position": {
             "x": 6,
-            "y": 7,
+            "y": 5,
             "width": 6,
             "height": 6
           }
@@ -651,7 +645,7 @@
           },
           "position": {
             "x": 0,
-            "y": 13,
+            "y": 11,
             "width": 12,
             "height": 8
           }
@@ -751,18 +745,18 @@
           },
           "position": {
             "x": 0,
-            "y": 21,
+            "y": 19,
             "width": 12,
             "height": 8
           }
         }
-      ]
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
     },
     {
       "name": "guest_demand",
       "displayName": "Guest demand",
-      "pageType": "PAGE_TYPE_CANVAS",
-      "layoutVersion": "GRID_V1",
       "layout": [
         {
           "widget": {
@@ -1047,12 +1041,12 @@
                       "expression": "SUM(`forecast_guests`)"
                     }
                   ],
-                  "disaggregated": false,
                   "filters": [
                     {
                       "expression": "`forecast_guests` IS NOT NULL"
                     }
-                  ]
+                  ],
+                  "disaggregated": false
                 }
               }
             ],
@@ -1134,12 +1128,12 @@
                       "expression": "SUM(`forecast_guests`)"
                     }
                   ],
-                  "disaggregated": false,
                   "filters": [
                     {
                       "expression": "`forecast_guests` IS NOT NULL"
                     }
-                  ]
+                  ],
+                  "disaggregated": false
                 }
               }
             ],
@@ -1190,13 +1184,13 @@
             "height": 8
           }
         }
-      ]
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
     },
     {
       "name": "filters",
       "displayName": "Filters",
-      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
-      "layoutVersion": "GRID_V1",
       "layout": [
         {
           "widget": {
@@ -1435,7 +1429,9 @@
             "height": 2
           }
         }
-      ]
+      ],
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1"
     }
   ],
   "uiSettings": {
