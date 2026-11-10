@@ -39,10 +39,12 @@ defaults from the bundle variables in `databricks.yml` (`catalog`, `schema`, `mo
 
 ## Get started
 
-1. This repo is private. Ask the owner to add your GitHub account as a collaborator, and accept the invite.
-2. In Databricks, link GitHub once: user icon → **Settings → Linked accounts** → **GitHub**.
-3. Go to **Workspace → your user folder → Create → Git folder**, paste this repo's URL, and create the Git folder.
-4. Open `00_README` and follow the steps.
+1. In Databricks, go to **Workspace → your user folder → Create → Git folder**, paste this repo's URL, and create the
+   Git folder. The repo is public, so no GitHub credentials are needed to clone it.
+2. Open `00_README` and follow the steps.
+
+To commit and push your own changes, fork the repo and link GitHub in Databricks: user icon → **Settings → Linked
+accounts** → **GitHub**.
 
 You need a Unity Catalog catalog where you can create a schema, and permission to create personal compute.
 Set your catalog as `DEFAULT_CATALOG` in `wfm_utils.py` (used when you run the notebooks by hand) and as `catalog`

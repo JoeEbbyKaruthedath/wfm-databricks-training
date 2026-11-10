@@ -47,11 +47,11 @@
 # MAGIC - Permission to create personal compute
 # MAGIC
 # MAGIC **Get the training into your workspace as a Git folder** (skip this if you already see it):
-# MAGIC 1. The repo is private: ask the repo owner to add your GitHub account as a collaborator, and accept the invite.
-# MAGIC 2. Link GitHub to Databricks once: click your user icon → **Settings → Linked accounts**, choose **GitHub**, and follow
-# MAGIC    the prompts to link your account.
-# MAGIC 3. Go to **Workspace → your user folder → Create → Git folder**, paste `https://github.com/JoeEbbyKaruthedath/wfm-databricks-training`, and click **Create Git folder**.
-# MAGIC 4. Open `00_README` inside the new folder.
+# MAGIC 1. Go to **Workspace → your user folder → Create → Git folder**, paste `https://github.com/JoeEbbyKaruthedath/wfm-databricks-training`, and click **Create Git folder**.
+# MAGIC    The repo is public, so you don't need GitHub credentials to clone it.
+# MAGIC 2. Open `00_README` inside the new folder.
+# MAGIC
+# MAGIC To commit and push your own changes, fork the repo and link GitHub to Databricks: user icon → **Settings → Linked accounts → GitHub**.
 # MAGIC
 # MAGIC To get updates later, click the branch name at the top of any notebook in the folder and choose **Pull**.
 # MAGIC
