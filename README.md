@@ -15,34 +15,7 @@ data. It forecasts hourly guest demand for each venue, then builds optimized sta
 | `databricks.yml`, `resources/` | Declarative Automation Bundle (DAB): the pipelines, the seed-data job and the dashboard |
 | `dashboards/venue_staffing_plan.lvdash.json` | The **Venue staffing plan** AI/BI dashboard |
 
-## The flow
-
-```mermaid
-flowchart TD
-    subgraph SETUP["Setup (once) · job: Create seed data"]
-        N01["01_setup_and_data"] --> SRC[("venues · venue_roles<br/>venue_demand_history")]
-    end
-
-    subgraph TRAIN["Training pipeline · job: Train demand forecaster · Sat 2 AM, paused"]
-        T1["02_feature_engineering<br/>purpose = training"] --> TF[("venue_training_features")]
-        TF --> T2["03_train_forecast_model"]
-        T2 --> MODEL{{"venue_demand_forecaster<br/>new version · @champion if better"}}
-    end
-
-    subgraph INFER["Inference pipeline · job: Weekly forecast and staff schedules · Sun 1 AM"]
-        I1["02_feature_engineering<br/>purpose = scoring"] --> SF[("venue_scoring_features")]
-        SF --> I2["04_forecast_demand"]
-        I2 --> FC[("venue_demand_forecast")]
-        FC --> I3["05_optimize_staff_schedules"]
-        I3 --> OUT[("venue_staff_schedule · venue_staffing_coverage<br/>venue_staffing_summary")]
-        OUT --> I4["refresh_dashboard<br/>(dashboard task)"]
-        I4 --> DASH["Venue staffing plan dashboard"]
-    end
-
-    SRC --> T1
-    SRC --> I1
-    MODEL -- "loads @champion" --> I2
-```
+## Pipelines: which notebook runs where
 
 | Pipeline (job) | Task | Notebook | Writes |
 |---|---|---|---|

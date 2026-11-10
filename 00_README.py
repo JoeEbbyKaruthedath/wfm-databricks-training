@@ -20,29 +20,7 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## The flow: which notebook runs where
-# MAGIC
-# MAGIC ```
-# MAGIC  SETUP (once)               01_setup_and_data
-# MAGIC  job: Create seed data          └─> venues, venue_roles, venue_demand_history (raw guests per venue and hour)
-# MAGIC
-# MAGIC  TRAINING PIPELINE          02_feature_engineering   (purpose = training)
-# MAGIC  job: Train demand              └─> venue_training_features
-# MAGIC  forecaster                 03_train_forecast_model
-# MAGIC  weekly, Sat 2 AM (paused)      └─> MLflow run + new model version in Unity Catalog
-# MAGIC                                     └─> moves @champion only if the new version is better
-# MAGIC                                                      │
-# MAGIC                         the @champion alias connects the two pipelines
-# MAGIC                                                      ▼
-# MAGIC  INFERENCE PIPELINE         02_feature_engineering   (purpose = scoring)
-# MAGIC  job: Weekly forecast and       └─> venue_scoring_features (next 7 days)
-# MAGIC  staff schedules            04_forecast_demand       (loads @champion)
-# MAGIC  weekly, Sun 1 AM               └─> venue_demand_forecast
-# MAGIC                             05_optimize_staff_schedules
-# MAGIC                                 └─> venue_staff_schedule, venue_staffing_coverage, venue_staffing_summary
-# MAGIC                             refresh_dashboard        (dashboard task, no notebook)
-# MAGIC                                 └─> Venue staffing plan dashboard
-# MAGIC ```
+# MAGIC ## Pipelines: which notebook runs where
 # MAGIC
 # MAGIC | Pipeline (job) | Task | Notebook | Writes |
 # MAGIC |---|---|---|---|
