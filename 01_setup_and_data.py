@@ -7,7 +7,8 @@
 # MAGIC - **Unity Catalog:** `catalog.schema.table`, tables vs. volumes
 # MAGIC - **The demo data:** 20 synthetic venues across two parks, with two years of hourly guest demand
 # MAGIC
-# MAGIC **Run order:** `01` once to set up → `02` train the forecaster → `03` forecast demand → `04` build staff schedules.
+# MAGIC **Run order:** `01` once to set up. Then the **training** pipeline (`02` features → `03` train) and the
+# MAGIC **inference** pipeline (`02` features → `04` forecast → `05` staff schedules → dashboard refresh).
 # MAGIC
 # MAGIC All data in this demo is synthetic.
 
@@ -93,7 +94,8 @@ def save(pdf, table, comment):
 
 save(venues_pdf, "venues", "Synthetic venues: park, type, base demand and opening hours")
 save(roles_pdf, "venue_roles", "Staffing roles per venue type: guests one staff member can serve per hour, minimum staff")
-save(history_pdf, "venue_demand_history", "Synthetic hourly guest demand per venue")
+save(history_pdf[["venue_id", "date", "hour", "guests"]], "venue_demand_history",
+     "Synthetic raw demand: guests per venue and hour. Features are built by 02_feature_engineering")
 
 # COMMAND ----------
 
@@ -104,10 +106,11 @@ save(history_pdf, "venue_demand_history", "Synthetic hourly guest demand per ven
 # COMMAND ----------
 
 display(spark.sql(f"""
-    SELECT venue_type, hour, ROUND(AVG(guests)) AS avg_guests
-    FROM `{catalog}`.`{schema}`.venue_demand_history
-    GROUP BY venue_type, hour
-    ORDER BY venue_type, hour
+    SELECT v.venue_type, h.hour, ROUND(AVG(h.guests)) AS avg_guests
+    FROM `{catalog}`.`{schema}`.venue_demand_history h
+    JOIN `{catalog}`.`{schema}`.venues v USING (venue_id)
+    GROUP BY v.venue_type, h.hour
+    ORDER BY v.venue_type, h.hour
 """))
 
 # COMMAND ----------

@@ -1,13 +1,14 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 02 · Train the demand forecaster with MLflow
+# MAGIC # 03 · Train the demand forecaster with MLflow
 # MAGIC
 # MAGIC This notebook covers:
 # MAGIC - **Experiments:** every run records its parameters, metrics, plots and the exact training data
 # MAGIC - **Model registry in Unity Catalog:** each training run registers a new, versioned model
 # MAGIC - **Champion/challenger:** the new version becomes `@champion` only if it beats the current champion on the holdout weeks
 # MAGIC
-# MAGIC In production this notebook runs as the **training job**. The inference job always loads `@champion`.
+# MAGIC This is the second task of the **training** pipeline, after `02_feature_engineering` builds `venue_training_features`.
+# MAGIC The inference pipeline always loads `@champion`.
 
 # COMMAND ----------
 
@@ -30,7 +31,7 @@ learning_rate = float(dbutils.widgets.get("learning_rate"))
 holdout_weeks = int(dbutils.widgets.get("holdout_weeks"))
 
 full_model_name = f"{catalog}.{schema}.{model_name}"
-history_table = f"{catalog}.{schema}.venue_demand_history"
+features_table = f"{catalog}.{schema}.venue_training_features"
 
 # COMMAND ----------
 
@@ -56,14 +57,15 @@ print("MLflow", mlflow.__version__)
 
 # MAGIC %md
 # MAGIC ## Training data
-# MAGIC The last few weeks are held out so every model version is scored on the same unseen period.
+# MAGIC The features come from `venue_training_features`. The last few weeks are held out so every model version is
+# MAGIC scored on the same unseen period.
 
 # COMMAND ----------
 
-history = spark.table(history_table)
-history_version = spark.sql(f"DESCRIBE HISTORY {history_table} LIMIT 1").first()["version"]
+training_data = spark.table(features_table)
+features_version = spark.sql(f"DESCRIBE HISTORY {features_table} LIMIT 1").first()["version"]
 
-pdf = history.toPandas()
+pdf = training_data.toPandas()
 pdf["date"] = pd.to_datetime(pdf["date"])
 cutoff = pdf["date"].max() - pd.Timedelta(weeks=holdout_weeks)
 train, test = pdf[pdf["date"] <= cutoff], pdf[pdf["date"] > cutoff]
@@ -94,7 +96,7 @@ mlflow.xgboost.autolog(log_models=False)  # we log and register the model explic
 
 with mlflow.start_run(run_name=f"xgb_depth{max_depth}_trees{n_estimators}") as run:
     mlflow.log_input(
-        mlflow.data.from_spark(history, table_name=history_table, version=str(history_version)),
+        mlflow.data.from_spark(training_data, table_name=features_table, version=str(features_version)),
         context="training",
     )
     mlflow.log_params({"holdout_weeks": holdout_weeks, "training_cutoff": str(cutoff.date())})
@@ -131,7 +133,7 @@ print(f"Run {run.info.run_id}: holdout MAPE {mape:.1%}, WAPE {wape:.1%} → regi
 # MAGIC %md
 # MAGIC ## Champion or challenger?
 # MAGIC Score the current `@champion` on the same holdout weeks. Promote the new version only if it's better.
-# MAGIC Promotion just moves the alias, so the nightly job picks up the new model with no code change.
+# MAGIC Promotion just moves the alias, so the inference pipeline picks up the new model with no code change.
 
 # COMMAND ----------
 

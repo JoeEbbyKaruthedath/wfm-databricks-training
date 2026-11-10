@@ -6,14 +6,58 @@
 # MAGIC forecast hourly guest demand per venue, then build optimized staff schedules per venue.
 # MAGIC Follow along during the session, or work through the steps below on your own afterwards.
 # MAGIC
-# MAGIC | Notebook | What it does | Runs as |
-# MAGIC |---|---|---|
-# MAGIC | `01_setup_and_data` | Creates the schema, the `exports` volume and the seed data: 20 venues, staffing roles, two years of hourly demand | **Create seed data** job |
-# MAGIC | `02_train_forecast_model` | Trains an XGBoost demand model, tracks it in MLflow, registers it in Unity Catalog, and promotes `@champion` if it's better | **Train demand forecaster** job (weekly) |
-# MAGIC | `03_forecast_demand` | Loads `@champion` and forecasts every venue and open hour for the coming days | **Nightly** job, task 1 |
-# MAGIC | `04_optimize_staff_schedules` | Builds staff schedules with OR-Tools CP-SAT, venues solved in parallel; writes the schedules and a staffing summary | **Nightly** job, task 2 |
-# MAGIC | `05_create_jobs_and_dashboard` | Creates or updates the three jobs and the results dashboard (as code) | Run once |
-# MAGIC | `wfm_utils.py` | Shared helpers: synthetic data generator and calendar features | Imported by 01 and 03 |
+# MAGIC | Notebook / file | What it does |
+# MAGIC |---|---|
+# MAGIC | `01_setup_and_data` | Creates the schema, the `exports` volume and the source data: 20 venues, staffing roles, two years of hourly guest counts |
+# MAGIC | `02_feature_engineering` | Builds model features from the raw data, for training (`purpose = training`) or for scoring the coming days (`purpose = scoring`) |
+# MAGIC | `03_train_forecast_model` | Trains an XGBoost demand model, tracks it in MLflow, registers it in Unity Catalog, and promotes `@champion` if it's better |
+# MAGIC | `04_forecast_demand` | Inference: loads `@champion` and forecasts every venue and open hour in the scoring features |
+# MAGIC | `05_optimize_staff_schedules` | Builds staff schedules with OR-Tools CP-SAT, venues solved in parallel; writes the schedules, hourly coverage and a summary |
+# MAGIC | `wfm_utils.py` | Shared helpers: synthetic data generator and calendar features |
+# MAGIC | `databricks.yml`, `resources/` | The bundle: the two pipelines, the seed-data job and the dashboard, with all notebook parameters |
+# MAGIC | `dashboards/venue_staffing_plan.lvdash.json` | The **Venue staffing plan** dashboard |
+# MAGIC
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## The flow: which notebook runs where
+# MAGIC
+# MAGIC ```
+# MAGIC  SETUP (once)               01_setup_and_data
+# MAGIC  job: Create seed data          └─> venues, venue_roles, venue_demand_history (raw guests per venue and hour)
+# MAGIC
+# MAGIC  TRAINING PIPELINE          02_feature_engineering   (purpose = training)
+# MAGIC  job: Train demand              └─> venue_training_features
+# MAGIC  forecaster                 03_train_forecast_model
+# MAGIC  weekly, Sat 2 AM (paused)      └─> MLflow run + new model version in Unity Catalog
+# MAGIC                                     └─> moves @champion only if the new version is better
+# MAGIC                                                      │
+# MAGIC                         the @champion alias connects the two pipelines
+# MAGIC                                                      ▼
+# MAGIC  INFERENCE PIPELINE         02_feature_engineering   (purpose = scoring)
+# MAGIC  job: Weekly forecast and       └─> venue_scoring_features (next 7 days)
+# MAGIC  staff schedules            04_forecast_demand       (loads @champion)
+# MAGIC  weekly, Sun 1 AM               └─> venue_demand_forecast
+# MAGIC                             05_optimize_staff_schedules
+# MAGIC                                 └─> venue_staff_schedule, venue_staffing_coverage, venue_staffing_summary
+# MAGIC                             refresh_dashboard        (dashboard task, no notebook)
+# MAGIC                                 └─> Venue staffing plan dashboard
+# MAGIC ```
+# MAGIC
+# MAGIC | Pipeline (job) | Task | Notebook | Writes |
+# MAGIC |---|---|---|---|
+# MAGIC | Create seed data | `create_seed_data` | `01_setup_and_data` | `venues`, `venue_roles`, `venue_demand_history` |
+# MAGIC | **Training:** Train demand forecaster | 1. `feature_engineering` | `02_feature_engineering` (`purpose = training`) | `venue_training_features` |
+# MAGIC | | 2. `train_and_register` | `03_train_forecast_model` | model version, `@champion` / `@challenger` |
+# MAGIC | **Inference:** Weekly forecast and staff schedules | 1. `feature_engineering` | `02_feature_engineering` (`purpose = scoring`) | `venue_scoring_features` |
+# MAGIC | | 2. `forecast_demand` | `04_forecast_demand` | `venue_demand_forecast` |
+# MAGIC | | 3. `optimize_schedules` | `05_optimize_staff_schedules` | `venue_staff_schedule`, `venue_staffing_coverage`, `venue_staffing_summary` |
+# MAGIC | | 4. `refresh_dashboard` | (dashboard task) | refreshed **Venue staffing plan** |
+# MAGIC
+# MAGIC - **Training and inference never call each other.** Training publishes a model by moving `@champion`, and inference
+# MAGIC   always loads whatever `@champion` points to.
+# MAGIC - Both pipelines use the same `02_feature_engineering` notebook, so features are computed the same way for both.
+# MAGIC - Both are defined in `resources/wfm_pipelines.yml` and deployed together by the bundle.
 
 # COMMAND ----------
 
@@ -50,43 +94,62 @@
 # MAGIC **You should see:** the cluster running.
 # MAGIC
 # MAGIC **Good to know**
-# MAGIC - **Personal compute** is for development. **Job compute** runs scheduled work: it's created for each run and shuts down after.
+# MAGIC - **Personal compute** is for development. **Job compute** runs the pipelines: it's created for each run and shuts down after.
 # MAGIC - Cluster policies and auto-termination keep costs under control.
-# MAGIC - Notebook 04 installs the extra library it needs (OR-Tools) with `%pip install`, so there's nothing to install up front.
+# MAGIC - Notebook 05 installs the extra library it needs (OR-Tools) with `%pip install`, so there's nothing to install up front.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 2 · Unity Catalog and the seed data
+# MAGIC ## Step 2 · Unity Catalog and the source data
 # MAGIC **Do**
 # MAGIC 1. Open `01_setup_and_data`, attach it to your cluster, set the `catalog` widget, and click **Run all**.
 # MAGIC 2. Open **Catalog** and go to `<catalog>.wfm_training`.
 # MAGIC
-# MAGIC **You should see:** tables `venues`, `venue_roles` and `venue_demand_history`, and the volume `exports`.
+# MAGIC **You should see:**
+# MAGIC - `venues`: one row per venue (park, type, size, opening hours)
+# MAGIC - `venue_roles`: the staffing rules (guests one person can serve per hour, minimum staff)
+# MAGIC - `venue_demand_history`: raw guest counts per venue and hour, standing in for the data that comes from Snowflake
+# MAGIC - the `exports` volume
 # MAGIC
 # MAGIC **Try**
 # MAGIC - The **Sample data** tab on `venue_demand_history`
 # MAGIC - The **Permissions** tab: one set of grants covers tables, volumes and models
-# MAGIC - After steps 3–5, the **Lineage** tab: it shows which notebook or job wrote each table
+# MAGIC - After the later steps, the **Lineage** tab: it shows which notebook or job wrote each table
 # MAGIC
-# MAGIC **Recreate or reset the seed data any time:** rerun `01`, or run the **WFM training: Create seed data** job.
+# MAGIC **Recreate or reset the source data any time:** rerun `01`, or run the **WFM training: Create seed data** job.
 # MAGIC Both overwrite the seed tables. The generator is deterministic, so the same settings give the same data.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 3 · MLflow: train, track and register a model
+# MAGIC ## Step 3 · Feature engineering
 # MAGIC **Do**
-# MAGIC 1. Open `02_train_forecast_model`. Set `n_estimators` = **50** and `max_depth` = **3**, then **Run all**.
+# MAGIC 1. Open `02_feature_engineering`, set `purpose` = **training**, and click **Run all**.
+# MAGIC 2. Set `purpose` = **scoring** and run it again.
+# MAGIC
+# MAGIC **You should see:**
+# MAGIC - `venue_training_features`: every venue-hour of the history, with the features and the actual guests (the label)
+# MAGIC - `venue_scoring_features`: every venue-hour of the next 7 days, with the same features and no label
+# MAGIC
+# MAGIC **Why one notebook for both:** training and scoring compute features with the same code, so the model never sees
+# MAGIC features built two different ways.
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Step 4 · MLflow: train, track and register a model
+# MAGIC **Do**
+# MAGIC 1. Open `03_train_forecast_model`. Set `n_estimators` = **50** and `max_depth` = **3**, then **Run all**.
 # MAGIC    The first version becomes `@champion`.
 # MAGIC 2. Set them back to **300** and **6** and run again.
 # MAGIC
-# MAGIC **You should see:** the second version has a lower holdout MAPE and is promoted to `@champion`. The first
+# MAGIC **You should see:** the second version has a much lower holdout MAPE and is promoted to `@champion`. The first
 # MAGIC version becomes `@previous_champion`.
 # MAGIC
 # MAGIC **Look at**
 # MAGIC - **Experiments → wfm_training_demand_forecast** (in your user folder; experiments can't live inside a Git folder): select both runs and click **Compare** (parameters, metrics, the forecast plot)
-# MAGIC - A run's **Inputs:** the exact table and Delta version it was trained on
+# MAGIC - A run's **Inputs:** the exact feature table and Delta version it was trained on
 # MAGIC - **Catalog → Models → venue_demand_forecaster:** versions, aliases, and the run behind each version
 # MAGIC
 # MAGIC **Try:** run it once more with `max_depth` = **2**. The current champion wins, so the new version is only tagged `@challenger`.
@@ -94,28 +157,28 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 4 · Model as code: forecast with `@champion`
-# MAGIC **Do:** open `03_forecast_demand` and **Run all**.
+# MAGIC ## Step 5 · Model as code: inference with `@champion`
+# MAGIC **Do:** open `04_forecast_demand` and **Run all**.
 # MAGIC
 # MAGIC **You should see:** "Using … (@champion)" with the version number, and a new `venue_demand_forecast` table.
 # MAGIC
 # MAGIC **Try**
 # MAGIC 1. In **Catalog → Models → venue_demand_forecaster**, move the `@champion` alias to version 1.
-# MAGIC 2. Rerun `03`. It now uses version 1, with no code change.
+# MAGIC 2. Rerun `04`. It now uses version 1, with no code change.
 # MAGIC 3. Move `@champion` back to the best version.
 # MAGIC
-# MAGIC This is the point of shipping code, not model files: the job always asks Unity Catalog for the current champion.
+# MAGIC This is the point of shipping code, not model files: the pipeline always asks Unity Catalog for the current champion.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 5 · Spark: solving venues in parallel
-# MAGIC **Do:** open `04_optimize_staff_schedules` and **Run all**.
+# MAGIC ## Step 6 · Spark: solving venues in parallel
+# MAGIC **Do:** open `05_optimize_staff_schedules` and **Run all**.
 # MAGIC
 # MAGIC **You should see**
 # MAGIC - `venue_staff_schedule`: the shifts for every venue, day and role
-# MAGIC - `venue_staffing_summary`: required vs. scheduled staff-hours, with no understaffed hours
 # MAGIC - `venue_staffing_coverage`: staff needed vs. on duty for every venue, role and hour (the dashboard uses it)
+# MAGIC - `venue_staffing_summary`: needed vs. scheduled staff-hours per venue, with no understaffed hours
 # MAGIC
 # MAGIC **Look at:** expand **Spark Jobs** under the `applyInPandas` cell and open the stage. Its tasks share the venues between them
 # MAGIC and run in parallel across the cluster's cores, and across its workers on a multi-node cluster.
@@ -125,31 +188,41 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 6 · Jobs: create, schedule and rerun
-# MAGIC **Do it by hand once**
-# MAGIC 1. **Jobs & Pipelines → Create → Job**, and name it.
-# MAGIC 2. Add a task `forecast_demand` that runs notebook `03`.
-# MAGIC 3. Add a task `optimize_schedules` that runs `04` and **depends on** `forecast_demand`.
-# MAGIC 4. For compute, pick a **job cluster**, not your personal cluster.
-# MAGIC 5. Add **job parameters** `catalog` and `schema`, a **schedule** (for example, daily at 1:00 AM), and a failure **notification**.
-# MAGIC 6. Click **Run now**.
+# MAGIC ## Step 7 · Deploy and run the pipelines with the bundle
+# MAGIC The bundle (`databricks.yml` plus `resources/`) defines the two pipelines, the seed-data job and the dashboard as code,
+# MAGIC including every notebook parameter.
 # MAGIC
-# MAGIC **Or create all three jobs as code:** run `05_create_jobs_and_dashboard`. The jobs run the notebooks in this Git folder, so after a
-# MAGIC **Pull** they run the latest code.
+# MAGIC **Deploy**
+# MAGIC 1. Open `databricks.yml` and set your catalog: uncomment `variables:` and `catalog:` under the `dev` target.
+# MAGIC 2. **From the workspace:** with `databricks.yml` open, click the **Deployments** icon (rocket), choose the `dev` target,
+# MAGIC    and click **Deploy**. This needs serverless compute enabled in the workspace.
+# MAGIC 3. **Or from your laptop**, with the Databricks CLI:
+# MAGIC    `databricks bundle deploy -t dev --var="catalog=<your_catalog>"`
+# MAGIC
+# MAGIC The `dev` target prefixes the job names with `[dev <your name>]` and pauses every schedule. The `prod` target keeps the
+# MAGIC weekly inference schedule running.
+# MAGIC
+# MAGIC **Run:** open **Jobs & Pipelines**, or use the run (play) button under **Bundle resources**, in this order:
+# MAGIC 1. **Create seed data**
+# MAGIC 2. **Train demand forecaster**
+# MAGIC 3. **Weekly forecast and staff schedules**
+# MAGIC
+# MAGIC **Look at:** each job's **Tasks** graph, **Parameters**, **Schedules & Triggers** and **Runs**.
 # MAGIC
 # MAGIC **Try**
 # MAGIC - **Run now with different parameters:** for example `service_level` = 1.1, the way a daytime rerun would work
 # MAGIC - **Repair run:** if a task fails, it reruns only the failed tasks
-# MAGIC - Pause and resume the schedule
+# MAGIC - Change a parameter default in `resources/wfm_pipelines.yml`, deploy again, and see the job update
 # MAGIC
-# MAGIC **Jobs in Git:** with the Databricks CLI, `databricks bundle generate job --existing-job-id <id>` turns a job
-# MAGIC into YAML you can keep in Git, and `databricks bundle deploy -t <target>` deploys it to each environment.
+# MAGIC **Good to know:** to build a job by hand, use **Jobs & Pipelines → Create → Job**. Then
+# MAGIC `databricks bundle generate job --existing-job-id <id>` turns it into bundle YAML.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 7 · See the results in a dashboard
-# MAGIC **Do:** run `05_create_jobs_and_dashboard` if you haven't yet, then open **Dashboards → Venue staffing plan**.
+# MAGIC ## Step 8 · See the results in the dashboard
+# MAGIC **Do:** open **Dashboards → Venue staffing plan**. The bundle deploys it, and the last task of the inference pipeline
+# MAGIC refreshes it.
 # MAGIC
 # MAGIC **You should see two pages**
 # MAGIC - **Staffing plan:**
@@ -162,16 +235,15 @@
 # MAGIC
 # MAGIC **Try**
 # MAGIC - Filter to one park or venue type in the filter panel, or pick a single day on the Staffing plan page.
-# MAGIC - Run the nightly job with `service_level` = 1.2, then refresh the dashboard. The staffing buffer goes up.
+# MAGIC - Run the inference pipeline with `service_level` = 1.2. When it finishes, the staffing buffer on the dashboard is higher.
 # MAGIC
-# MAGIC **Good to know:** dashboards run on a SQL warehouse. The definition is in `dashboards/venue_staffing_plan.json`,
-# MAGIC so it's versioned in Git with the code.
+# MAGIC **Good to know:** dashboards run on a SQL warehouse (the bundle's `warehouse_id` variable).
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## Clean up
-# MAGIC - **Data, volume and model:** run `DROP SCHEMA <catalog>.wfm_training CASCADE`, or delete the schema in Catalog Explorer.
+# MAGIC - **Jobs and dashboard:** `databricks bundle destroy -t <target>`, or delete them in the UI
+# MAGIC - **Data, volume and model:** run `DROP SCHEMA <catalog>.wfm_training CASCADE`, or delete the schema in Catalog Explorer
 # MAGIC - **Experiment:** `/Users/<you>/wfm_training_demand_forecast`
-# MAGIC - **Jobs and dashboard:** delete the three "WFM training" jobs and the **Venue staffing plan** dashboard
 # MAGIC - **Cluster:** terminate or delete your personal compute

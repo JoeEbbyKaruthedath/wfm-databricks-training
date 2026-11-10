@@ -1,0 +1,9 @@
+resources:
+  dashboards:
+    venue_staffing_plan:
+      display_name: "Venue staffing plan"
+      file_path: ../dashboards/venue_staffing_plan.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      dataset_catalog: ${var.catalog}
+      dataset_schema: ${var.schema}
+      embed_credentials: true

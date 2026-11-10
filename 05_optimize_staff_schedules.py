@@ -4,14 +4,14 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # 04 · Build staff schedules with CP-SAT, venues in parallel
+# MAGIC # 05 · Build staff schedules with CP-SAT, venues in parallel
 # MAGIC
 # MAGIC This notebook covers:
 # MAGIC - **Notebook-scoped libraries:** the `%pip install` cell above installs OR-Tools for this notebook only
 # MAGIC - **Spark for parallel work:** `groupBy("venue_id").applyInPandas(...)` hands each venue's data to a Python function on the cluster, so venues are solved in parallel
 # MAGIC - **Outputs:** the shift schedules and a staffing summary, as tables in Unity Catalog
 # MAGIC
-# MAGIC In production this is the second task of the **nightly job**. For daytime reruns, run the job with
+# MAGIC This is the third task of the **inference** pipeline. For daytime reruns, run the pipeline with
 # MAGIC different parameters (for example, a higher `service_level` or a shorter `max_shift_hours`).
 
 # COMMAND ----------

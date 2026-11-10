@@ -1,0 +1,136 @@
+# The two WFM pipelines, deployed together with this bundle:
+#   training:  feature engineering (training) -> train, register and promote the model. Weekly schedule, paused.
+#   inference: feature engineering (scoring) -> forecast -> staff schedules -> dashboard refresh. Weekly, Sundays.
+# Both share the notebook 02_feature_engineering, with a different `purpose`.
+
+resources:
+  jobs:
+    # ---------------------------------------------------------------- training pipeline
+    training:
+      name: "WFM training: Train demand forecaster"
+      description: >-
+        Training pipeline. Builds training features from the demand history, trains the demand model, registers a
+        new version in Unity Catalog, and promotes it to @champion only if it beats the current champion.
+      max_concurrent_runs: 1
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: model_name
+          default: ${var.model_name}
+        - name: n_estimators
+          default: "300"
+        - name: max_depth
+          default: "6"
+        - name: learning_rate
+          default: "0.1"
+        - name: holdout_weeks
+          default: "8"
+      job_clusters:
+        - job_cluster_key: single_node
+          new_cluster: ${var.single_node_cluster}
+      tasks:
+        - task_key: feature_engineering
+          job_cluster_key: single_node
+          timeout_seconds: 3600
+          notebook_task:
+            notebook_path: ../02_feature_engineering.py
+            base_parameters:
+              purpose: training
+
+        - task_key: train_and_register
+          depends_on:
+            - task_key: feature_engineering
+          job_cluster_key: single_node
+          max_retries: 1
+          min_retry_interval_millis: 60000
+          timeout_seconds: 3600
+          notebook_task:
+            notebook_path: ../03_train_forecast_model.py
+
+      # Retrain weekly when you're ready: change pause_status to UNPAUSED.
+      schedule:
+        quartz_cron_expression: "0 0 2 ? * SAT"
+        timezone_id: America/New_York
+        pause_status: PAUSED
+
+    # ---------------------------------------------------------------- inference pipeline
+    inference:
+      name: "WFM training: Weekly forecast and staff schedules"
+      description: >-
+        Inference pipeline. Builds scoring features for the coming days, forecasts demand with the @champion model,
+        builds optimized staff schedules for every venue, and refreshes the Venue staffing plan dashboard.
+      max_concurrent_runs: 1
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: model_name
+          default: ${var.model_name}
+        - name: forecast_days
+          default: "7"
+        - name: start_date
+          default: ""
+        - name: venues
+          default: all
+        - name: service_level
+          default: "1.0"
+        - name: min_shift_hours
+          default: "4"
+        - name: max_shift_hours
+          default: "8"
+      job_clusters:
+        - job_cluster_key: single_node
+          new_cluster: ${var.single_node_cluster}
+        - job_cluster_key: optimizer
+          new_cluster: ${var.optimizer_cluster}
+      tasks:
+        - task_key: feature_engineering
+          job_cluster_key: single_node
+          timeout_seconds: 3600
+          notebook_task:
+            notebook_path: ../02_feature_engineering.py
+            base_parameters:
+              purpose: scoring
+
+        - task_key: forecast_demand
+          depends_on:
+            - task_key: feature_engineering
+          job_cluster_key: single_node
+          max_retries: 1
+          min_retry_interval_millis: 60000
+          timeout_seconds: 3600
+          notebook_task:
+            notebook_path: ../04_forecast_demand.py
+
+        - task_key: optimize_schedules
+          depends_on:
+            - task_key: forecast_demand
+          job_cluster_key: optimizer
+          max_retries: 1
+          min_retry_interval_millis: 60000
+          timeout_seconds: 3600
+          notebook_task:
+            notebook_path: ../05_optimize_staff_schedules.py
+
+        - task_key: refresh_dashboard
+          depends_on:
+            - task_key: optimize_schedules
+          dashboard_task:
+            dashboard_id: ${resources.dashboards.venue_staffing_plan.id}
+            warehouse_id: ${var.warehouse_id}
+
+      # Sundays at 1:00 AM: forecasts and schedules the coming Monday to Sunday.
+      # Development-mode deployments pause schedules automatically.
+      schedule:
+        quartz_cron_expression: "0 0 1 ? * SUN"
+        timezone_id: America/New_York
+        pause_status: UNPAUSED

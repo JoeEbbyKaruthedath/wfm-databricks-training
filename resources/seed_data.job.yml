@@ -1,0 +1,27 @@
+resources:
+  jobs:
+    seed_data:
+      name: "WFM training: Create seed data"
+      description: >-
+        Creates the schema, the exports volume and the synthetic source data: venues, staffing roles and two years
+        of hourly guest demand. Safe to rerun; it overwrites the seed tables.
+      max_concurrent_runs: 1
+      email_notifications:
+        on_failure:
+          - ${var.notification_email}
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+        - name: history_days
+          default: "730"
+      job_clusters:
+        - job_cluster_key: single_node
+          new_cluster: ${var.single_node_cluster}
+      tasks:
+        - task_key: create_seed_data
+          job_cluster_key: single_node
+          timeout_seconds: 3600
+          notebook_task:
+            notebook_path: ../01_setup_and_data.py
