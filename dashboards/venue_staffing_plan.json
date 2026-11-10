@@ -1,0 +1,1421 @@
+{
+  "datasets": [
+    {
+      "name": "ds_coverage",
+      "displayName": "Staff needed vs. on duty (hourly)",
+      "queryLines": [
+        "SELECT venue_id, venue_name, park, venue_type, date, hour, role, required_staff, scheduled_staff, understaffed\n",
+        "FROM venue_staffing_coverage\n"
+      ],
+      "columns": [
+        {
+          "displayName": "Staffing buffer",
+          "description": "Scheduled staff-hours above what demand needs",
+          "expression": "SUM(`scheduled_staff`) / SUM(`required_staff`) - 1"
+        }
+      ]
+    },
+    {
+      "name": "ds_shifts",
+      "displayName": "Shift schedule",
+      "queryLines": [
+        "SELECT s.date, s.venue_id, s.venue_name, v.park, v.venue_type, s.role,\n",
+        "       s.shift_start, s.shift_end, s.shift_hours, s.staff_count,\n",
+        "       s.staff_count * s.shift_hours AS staff_hours,\n",
+        "       CONCAT(LPAD(CAST(s.shift_start AS STRING), 2, '0'), ':00') AS start_time,\n",
+        "       CONCAT(LPAD(CAST(s.shift_end AS STRING), 2, '0'), ':00') AS end_time\n",
+        "FROM venue_staff_schedule s\n",
+        "JOIN venues v ON v.venue_id = s.venue_id\n"
+      ]
+    },
+    {
+      "name": "ds_demand",
+      "displayName": "Guest demand: last 8 weeks and forecast",
+      "queryLines": [
+        "WITH demand AS (\n",
+        "  SELECT venue_id, date, hour, CAST(guests AS DOUBLE) AS actual_guests, CAST(NULL AS DOUBLE) AS forecast_guests\n",
+        "  FROM venue_demand_history\n",
+        "  WHERE date > date_sub((SELECT MAX(date) FROM venue_demand_history), 56)\n",
+        "  UNION ALL\n",
+        "  SELECT venue_id, date, hour, CAST(NULL AS DOUBLE) AS actual_guests, forecast_guests\n",
+        "  FROM venue_demand_forecast\n",
+        ")\n",
+        "SELECT d.venue_id, v.venue_name, v.park, v.venue_type, d.date, d.hour,\n",
+        "       date_format(d.date, 'MM-dd EEE') AS day_label, d.actual_guests, d.forecast_guests\n",
+        "FROM demand d\n",
+        "JOIN venues v ON v.venue_id = d.venue_id\n"
+      ],
+      "columns": [
+        {
+          "displayName": "Forecast daily average",
+          "description": "Forecast guests per day over the forecast window",
+          "expression": "SUM(`forecast_guests`) / COUNT(DISTINCT CASE WHEN `forecast_guests` IS NOT NULL THEN `date` END)"
+        },
+        {
+          "displayName": "Change vs last 8 weeks",
+          "description": "Forecast daily average vs. the actual daily average of the last 8 weeks",
+          "expression": "(SUM(`forecast_guests`) / COUNT(DISTINCT CASE WHEN `forecast_guests` IS NOT NULL THEN `date` END)) / (SUM(`actual_guests`) / COUNT(DISTINCT CASE WHEN `actual_guests` IS NOT NULL THEN `date` END)) - 1"
+        }
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "staffing_plan",
+      "displayName": "Staffing plan",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "staffing_title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Venue staffing plan\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "staffing_subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Optimized staff schedules for the next 7 days, built from the guest demand forecast. All data is synthetic.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "day_filter",
+            "queries": [
+              {
+                "name": "day_filter_ds_coverage",
+                "query": {
+                  "datasetName": "ds_coverage",
+                  "fields": [
+                    {
+                      "name": "date",
+                      "expression": "`date`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "day_filter_ds_shifts",
+                "query": {
+                  "datasetName": "ds_shifts",
+                  "fields": [
+                    {
+                      "name": "date",
+                      "expression": "`date`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "date",
+                    "displayName": "Day",
+                    "queryName": "day_filter_ds_coverage"
+                  },
+                  {
+                    "fieldName": "date",
+                    "displayName": "Day",
+                    "queryName": "day_filter_ds_shifts"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Day"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "day_hint",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Pick one or more days to focus the plan, or leave it blank for the whole week. Park, venue type and venue filters are in the filter panel.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 9,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_shifts",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_shifts",
+                  "fields": [
+                    {
+                      "name": "sum(staff_count)",
+                      "expression": "SUM(`staff_count`)"
+                    },
+                    {
+                      "name": "daily(date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `date`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(staff_count)",
+                  "displayName": "Shifts scheduled",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  }
+                },
+                "period": {
+                  "fieldName": "daily(date)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Shifts scheduled"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_staff_hours",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_shifts",
+                  "fields": [
+                    {
+                      "name": "sum(staff_hours)",
+                      "expression": "SUM(`staff_hours`)"
+                    },
+                    {
+                      "name": "daily(date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `date`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(staff_hours)",
+                  "displayName": "Staff-hours scheduled",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  }
+                },
+                "period": {
+                  "fieldName": "daily(date)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Staff-hours scheduled"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 4,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_buffer",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_coverage",
+                  "fields": [
+                    {
+                      "name": "measure(Staffing buffer)",
+                      "expression": "MEASURE(`Staffing buffer`)"
+                    },
+                    {
+                      "name": "daily(date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `date`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Staffing buffer)",
+                  "displayName": "Staffing buffer",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "period": {
+                  "fieldName": "daily(date)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Staffing buffer",
+                "showDescription": true,
+                "description": "Scheduled staff-hours above what demand needs"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 4,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_below_need",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_coverage",
+                  "fields": [
+                    {
+                      "name": "sum(understaffed)",
+                      "expression": "SUM(`understaffed`)"
+                    },
+                    {
+                      "name": "daily(date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `date`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(understaffed)",
+                  "displayName": "Hours below need",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
+                    }
+                  }
+                },
+                "period": {
+                  "fieldName": "daily(date)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Hours below need",
+                "showDescription": true,
+                "description": "Venue-role-hours with fewer staff on duty than needed"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 4,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "needed_vs_on_duty",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_coverage",
+                  "fields": [
+                    {
+                      "name": "hour",
+                      "expression": "`hour`"
+                    },
+                    {
+                      "name": "sum(scheduled_staff)",
+                      "expression": "SUM(`scheduled_staff`)"
+                    },
+                    {
+                      "name": "sum(required_staff)",
+                      "expression": "SUM(`required_staff`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "hour",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Hour of day"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Staff",
+                  "fields": [
+                    {
+                      "fieldName": "sum(scheduled_staff)",
+                      "displayName": "On duty"
+                    },
+                    {
+                      "fieldName": "sum(required_staff)",
+                      "displayName": "Needed"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Staff on duty vs. needed, by hour",
+                "showDescription": true,
+                "description": "Summed over the selected days and venues. The gap mid-afternoon is shifts bridging the lunch and dinner peaks."
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 7,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "staff_hours_by_day_role",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_shifts",
+                  "fields": [
+                    {
+                      "name": "date",
+                      "expression": "`date`"
+                    },
+                    {
+                      "name": "role",
+                      "expression": "`role`"
+                    },
+                    {
+                      "name": "sum(staff_hours)",
+                      "expression": "SUM(`staff_hours`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "date",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Day"
+                },
+                "y": {
+                  "fieldName": "sum(staff_hours)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Staff-hours"
+                },
+                "color": {
+                  "fieldName": "role",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Role"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Staff-hours by day and role"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 7,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "venue_needed_vs_scheduled",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_coverage",
+                  "fields": [
+                    {
+                      "name": "venue_name",
+                      "expression": "`venue_name`"
+                    },
+                    {
+                      "name": "sum(required_staff)",
+                      "expression": "SUM(`required_staff`)"
+                    },
+                    {
+                      "name": "sum(scheduled_staff)",
+                      "expression": "SUM(`scheduled_staff`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Staff-hours",
+                  "fields": [
+                    {
+                      "fieldName": "sum(scheduled_staff)",
+                      "displayName": "Scheduled"
+                    },
+                    {
+                      "fieldName": "sum(required_staff)",
+                      "displayName": "Needed"
+                    }
+                  ]
+                },
+                "y": {
+                  "fieldName": "venue_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Venue"
+                }
+              },
+              "mark": {
+                "layout": "group"
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Scheduled vs. needed staff-hours, by venue"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 12,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "shift_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_shifts",
+                  "fields": [
+                    {
+                      "name": "date",
+                      "expression": "`date`"
+                    },
+                    {
+                      "name": "park",
+                      "expression": "`park`"
+                    },
+                    {
+                      "name": "venue_name",
+                      "expression": "`venue_name`"
+                    },
+                    {
+                      "name": "role",
+                      "expression": "`role`"
+                    },
+                    {
+                      "name": "start_time",
+                      "expression": "`start_time`"
+                    },
+                    {
+                      "name": "end_time",
+                      "expression": "`end_time`"
+                    },
+                    {
+                      "name": "shift_hours",
+                      "expression": "`shift_hours`"
+                    },
+                    {
+                      "name": "staff_count",
+                      "expression": "`staff_count`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "date",
+                    "displayName": "Day"
+                  },
+                  {
+                    "fieldName": "park",
+                    "displayName": "Park"
+                  },
+                  {
+                    "fieldName": "venue_name",
+                    "displayName": "Venue"
+                  },
+                  {
+                    "fieldName": "role",
+                    "displayName": "Role"
+                  },
+                  {
+                    "fieldName": "start_time",
+                    "displayName": "Start"
+                  },
+                  {
+                    "fieldName": "end_time",
+                    "displayName": "End"
+                  },
+                  {
+                    "fieldName": "shift_hours",
+                    "displayName": "Hours"
+                  },
+                  {
+                    "fieldName": "staff_count",
+                    "displayName": "Staff"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Shift schedule",
+                "showDescription": true,
+                "description": "One row per shift pattern: how many people start at that time, for how long"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 21,
+            "width": 12,
+            "height": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "guest_demand",
+      "displayName": "Guest demand",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "demand_title",
+            "multilineTextboxSpec": {
+              "lines": [
+                "# Guest demand\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "demand_subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Hourly guest demand: the last 8 weeks of actuals and the forecast for the next 7 days. All data is synthetic.\n"
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_forecast_guests",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_demand",
+                  "fields": [
+                    {
+                      "name": "sum(forecast_guests)",
+                      "expression": "SUM(`forecast_guests`)"
+                    },
+                    {
+                      "name": "daily(date)",
+                      "expression": "DATE_TRUNC(\"DAY\", `date`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(forecast_guests)",
+                  "displayName": "Forecast guests, next 7 days",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "period": {
+                  "fieldName": "daily(date)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Forecast guests, next 7 days"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_forecast_daily",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_demand",
+                  "fields": [
+                    {
+                      "name": "measure(Forecast daily average)",
+                      "expression": "MEASURE(`Forecast daily average`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Forecast daily average)",
+                  "displayName": "Forecast guests per day",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Forecast guests per day"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "kpi_change",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_demand",
+                  "fields": [
+                    {
+                      "name": "measure(Change vs last 8 weeks)",
+                      "expression": "MEASURE(`Change vs last 8 weeks`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "measure(Change vs last 8 weeks)",
+                  "displayName": "Compared with the last 8 weeks",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Compared with the last 8 weeks",
+                "showDescription": true,
+                "description": "Forecast guests per day vs. actual guests per day over the last 8 weeks"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 2,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "daily_guests",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_demand",
+                  "fields": [
+                    {
+                      "name": "date",
+                      "expression": "`date`"
+                    },
+                    {
+                      "name": "sum(actual_guests)",
+                      "expression": "SUM(`actual_guests`)"
+                    },
+                    {
+                      "name": "sum(forecast_guests)",
+                      "expression": "SUM(`forecast_guests`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "date",
+                  "scale": {
+                    "type": "temporal"
+                  },
+                  "displayName": "Day"
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Guests",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  },
+                  "fields": [
+                    {
+                      "fieldName": "sum(actual_guests)",
+                      "displayName": "Actual"
+                    },
+                    {
+                      "fieldName": "sum(forecast_guests)",
+                      "displayName": "Forecast"
+                    }
+                  ]
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Guests per day: last 8 weeks and next 7 days",
+                "showDescription": true,
+                "description": "The Friday and Saturday spikes in the actuals are evening events, which end in October"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "forecast_heatmap",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_demand",
+                  "fields": [
+                    {
+                      "name": "day_label",
+                      "expression": "`day_label`"
+                    },
+                    {
+                      "name": "hour",
+                      "expression": "`hour`"
+                    },
+                    {
+                      "name": "sum(forecast_guests)",
+                      "expression": "SUM(`forecast_guests`)"
+                    }
+                  ],
+                  "disaggregated": false,
+                  "filters": [
+                    {
+                      "expression": "`forecast_guests` IS NOT NULL"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "heatmap",
+              "encodings": {
+                "x": {
+                  "fieldName": "day_label",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "axis": {
+                    "hideTitle": true
+                  }
+                },
+                "y": {
+                  "fieldName": "hour",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Hour"
+                },
+                "color": {
+                  "fieldName": "sum(forecast_guests)",
+                  "displayName": "Forecast guests",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  },
+                  "scale": {
+                    "type": "quantitative",
+                    "colorRamp": {
+                      "mode": "custom-sequential",
+                      "colors": {
+                        "start": "#EAF3FB",
+                        "end": "#0072B2"
+                      }
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "When guests arrive: forecast by day and hour"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 6,
+            "height": 8
+          }
+        },
+        {
+          "widget": {
+            "name": "busiest_venues",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_demand",
+                  "fields": [
+                    {
+                      "name": "venue_name",
+                      "expression": "`venue_name`"
+                    },
+                    {
+                      "name": "venue_type",
+                      "expression": "`venue_type`"
+                    },
+                    {
+                      "name": "sum(forecast_guests)",
+                      "expression": "SUM(`forecast_guests`)"
+                    }
+                  ],
+                  "disaggregated": false,
+                  "filters": [
+                    {
+                      "expression": "`forecast_guests` IS NOT NULL"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(forecast_guests)",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Forecast guests",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "venue_name",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Venue"
+                },
+                "color": {
+                  "fieldName": "venue_type",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Venue type"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Forecast guests by venue, next 7 days"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 11,
+            "width": 6,
+            "height": 8
+          }
+        }
+      ]
+    },
+    {
+      "name": "filters",
+      "displayName": "Filters",
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1",
+      "layout": [
+        {
+          "widget": {
+            "name": "park_filter",
+            "queries": [
+              {
+                "name": "park_filter_ds_coverage",
+                "query": {
+                  "datasetName": "ds_coverage",
+                  "fields": [
+                    {
+                      "name": "park",
+                      "expression": "`park`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "park_filter_ds_shifts",
+                "query": {
+                  "datasetName": "ds_shifts",
+                  "fields": [
+                    {
+                      "name": "park",
+                      "expression": "`park`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "park_filter_ds_demand",
+                "query": {
+                  "datasetName": "ds_demand",
+                  "fields": [
+                    {
+                      "name": "park",
+                      "expression": "`park`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "park",
+                    "displayName": "Park",
+                    "queryName": "park_filter_ds_coverage"
+                  },
+                  {
+                    "fieldName": "park",
+                    "displayName": "Park",
+                    "queryName": "park_filter_ds_shifts"
+                  },
+                  {
+                    "fieldName": "park",
+                    "displayName": "Park",
+                    "queryName": "park_filter_ds_demand"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Park"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "type_filter",
+            "queries": [
+              {
+                "name": "type_filter_ds_coverage",
+                "query": {
+                  "datasetName": "ds_coverage",
+                  "fields": [
+                    {
+                      "name": "venue_type",
+                      "expression": "`venue_type`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "type_filter_ds_shifts",
+                "query": {
+                  "datasetName": "ds_shifts",
+                  "fields": [
+                    {
+                      "name": "venue_type",
+                      "expression": "`venue_type`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "type_filter_ds_demand",
+                "query": {
+                  "datasetName": "ds_demand",
+                  "fields": [
+                    {
+                      "name": "venue_type",
+                      "expression": "`venue_type`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "venue_type",
+                    "displayName": "Venue type",
+                    "queryName": "type_filter_ds_coverage"
+                  },
+                  {
+                    "fieldName": "venue_type",
+                    "displayName": "Venue type",
+                    "queryName": "type_filter_ds_shifts"
+                  },
+                  {
+                    "fieldName": "venue_type",
+                    "displayName": "Venue type",
+                    "queryName": "type_filter_ds_demand"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Venue type"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "venue_filter",
+            "queries": [
+              {
+                "name": "venue_filter_ds_coverage",
+                "query": {
+                  "datasetName": "ds_coverage",
+                  "fields": [
+                    {
+                      "name": "venue_name",
+                      "expression": "`venue_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "venue_filter_ds_shifts",
+                "query": {
+                  "datasetName": "ds_shifts",
+                  "fields": [
+                    {
+                      "name": "venue_name",
+                      "expression": "`venue_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "venue_filter_ds_demand",
+                "query": {
+                  "datasetName": "ds_demand",
+                  "fields": [
+                    {
+                      "name": "venue_name",
+                      "expression": "`venue_name`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "venue_name",
+                    "displayName": "Venue",
+                    "queryName": "venue_filter_ds_coverage"
+                  },
+                  {
+                    "fieldName": "venue_name",
+                    "displayName": "Venue",
+                    "queryName": "venue_filter_ds_shifts"
+                  },
+                  {
+                    "fieldName": "venue_name",
+                    "displayName": "Venue",
+                    "queryName": "venue_filter_ds_demand"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Venue"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 4,
+            "height": 2
+          }
+        }
+      ]
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "canvasBackgroundColor": {
+        "light": "#F5F7FA",
+        "dark": "#0E1621"
+      },
+      "widgetBackgroundColor": {
+        "light": "#FFFFFF",
+        "dark": "#152232"
+      },
+      "widgetBorderColor": {
+        "light": "#FFFFFF",
+        "dark": "#152232"
+      },
+      "fontColor": {
+        "light": "#13233A",
+        "dark": "#E6EDF5"
+      },
+      "selectionColor": {
+        "light": "#2272B4",
+        "dark": "#8ACAFF"
+      },
+      "visualizationColors": [
+        "#0072B2",
+        "#E69F00",
+        "#009E73",
+        "#CC79A7",
+        "#56B4E9",
+        "#D55E00",
+        "#F0E442",
+        "#5B6770"
+      ],
+      "widgetHeaderAlignment": "LEFT",
+      "fontFamily": "Inter",
+      "widgetCornerRadius": 10
+    }
+  }
+}

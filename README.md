@@ -10,7 +10,8 @@ data. It forecasts hourly guest demand for each venue, then builds optimized sta
 | `02_train_forecast_model` | Trains an XGBoost demand model, tracks it in MLflow, registers it in Unity Catalog, and promotes `@champion` if it beats the current champion |
 | `03_forecast_demand` | Loads `@champion` and forecasts every venue and open hour for the coming days |
 | `04_optimize_staff_schedules` | Builds staff schedules with OR-Tools CP-SAT, solving venues in parallel with Spark |
-| `05_create_jobs` | Creates or updates three jobs: seed data, weekly training, nightly forecast and schedules |
+| `05_create_jobs_and_dashboard` | Creates or updates three jobs (seed data, weekly training, nightly forecast and schedules) and the results dashboard |
+| `dashboards/venue_staffing_plan.json` | The **Venue staffing plan** AI/BI dashboard definition |
 | `wfm_utils.py` | Shared helpers: synthetic data generator and calendar features |
 
 ## Get started
@@ -26,9 +27,10 @@ The notebooks run on Databricks Runtime ML (LTS).
 ## What it creates
 
 - **Schema** `<catalog>.wfm_training`: tables `venues`, `venue_roles`, `venue_demand_history`, `venue_demand_forecast`,
-  `venue_staff_schedule`, `venue_staffing_summary`; volume `exports`; model `venue_demand_forecaster`
+  `venue_staff_schedule`, `venue_staffing_coverage`, `venue_staffing_summary`; volume `exports`; model `venue_demand_forecaster`
 - **MLflow experiment** `/Users/<you>/wfm_training_demand_forecast`
-- **Jobs** (from `05_create_jobs`): *WFM training: Create seed data*, *WFM training: Train demand forecaster*,
+- **Jobs** (from `05_create_jobs_and_dashboard`): *WFM training: Create seed data*, *WFM training: Train demand forecaster*,
   *WFM training: Nightly forecast and staff schedules*. Schedules start paused.
+- **Dashboard** *Venue staffing plan* in your user folder (runs on a SQL warehouse)
 
 All data is synthetic.

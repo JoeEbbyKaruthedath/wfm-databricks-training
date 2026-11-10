@@ -12,7 +12,7 @@
 # MAGIC | `02_train_forecast_model` | Trains an XGBoost demand model, tracks it in MLflow, registers it in Unity Catalog, and promotes `@champion` if it's better | **Train demand forecaster** job (weekly) |
 # MAGIC | `03_forecast_demand` | Loads `@champion` and forecasts every venue and open hour for the coming days | **Nightly** job, task 1 |
 # MAGIC | `04_optimize_staff_schedules` | Builds staff schedules with OR-Tools CP-SAT, venues solved in parallel; writes the schedules and a staffing summary | **Nightly** job, task 2 |
-# MAGIC | `05_create_jobs` | Creates or updates the three jobs in your workspace (jobs as code) | Run once |
+# MAGIC | `05_create_jobs_and_dashboard` | Creates or updates the three jobs and the results dashboard (as code) | Run once |
 # MAGIC | `wfm_utils.py` | Shared helpers: synthetic data generator and calendar features | Imported by 01 and 03 |
 
 # COMMAND ----------
@@ -115,6 +115,7 @@
 # MAGIC **You should see**
 # MAGIC - `venue_staff_schedule`: the shifts for every venue, day and role
 # MAGIC - `venue_staffing_summary`: required vs. scheduled staff-hours, with no understaffed hours
+# MAGIC - `venue_staffing_coverage`: staff needed vs. on duty for every venue, role and hour (the dashboard uses it)
 # MAGIC
 # MAGIC **Look at:** expand **Spark Jobs** under the `applyInPandas` cell and open the stage. Its tasks share the venues between them
 # MAGIC and run in parallel across the cluster's cores, and across its workers on a multi-node cluster.
@@ -133,7 +134,7 @@
 # MAGIC 5. Add **job parameters** `catalog` and `schema`, a **schedule** (for example, daily at 1:00 AM), and a failure **notification**.
 # MAGIC 6. Click **Run now**.
 # MAGIC
-# MAGIC **Or create all three jobs as code:** run `05_create_jobs`. The jobs run the notebooks in this Git folder, so after a
+# MAGIC **Or create all three jobs as code:** run `05_create_jobs_and_dashboard`. The jobs run the notebooks in this Git folder, so after a
 # MAGIC **Pull** they run the latest code.
 # MAGIC
 # MAGIC **Try**
@@ -147,8 +148,30 @@
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## Step 7 · See the results in a dashboard
+# MAGIC **Do:** run `05_create_jobs_and_dashboard` if you haven't yet, then open **Dashboards → Venue staffing plan**.
+# MAGIC
+# MAGIC **You should see two pages**
+# MAGIC - **Staffing plan:**
+# MAGIC   - shifts, staff-hours, staffing buffer and hours below need
+# MAGIC   - staff on duty vs. needed by hour, staff-hours by day and role, and by venue
+# MAGIC   - the shift schedule
+# MAGIC - **Guest demand:**
+# MAGIC   - forecast guests, compared with the last 8 weeks
+# MAGIC   - guests per day, when guests arrive by day and hour, and the busiest venues
+# MAGIC
+# MAGIC **Try**
+# MAGIC - Filter to one park or venue type in the filter panel, or pick a single day on the Staffing plan page.
+# MAGIC - Run the nightly job with `service_level` = 1.2, then refresh the dashboard. The staffing buffer goes up.
+# MAGIC
+# MAGIC **Good to know:** dashboards run on a SQL warehouse. The definition is in `dashboards/venue_staffing_plan.json`,
+# MAGIC so it's versioned in Git with the code.
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ## Clean up
 # MAGIC - **Data, volume and model:** run `DROP SCHEMA <catalog>.wfm_training CASCADE`, or delete the schema in Catalog Explorer.
 # MAGIC - **Experiment:** `/Users/<you>/wfm_training_demand_forecast`
-# MAGIC - **Jobs:** delete the three "WFM training" jobs
+# MAGIC - **Jobs and dashboard:** delete the three "WFM training" jobs and the **Venue staffing plan** dashboard
 # MAGIC - **Cluster:** terminate or delete your personal compute

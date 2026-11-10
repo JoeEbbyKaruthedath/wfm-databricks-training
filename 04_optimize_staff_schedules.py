@@ -60,7 +60,7 @@ required = (
         "required_staff",
         F.greatest(F.col("min_staff"), F.ceil(F.col("forecast_guests") * service_level / F.col("guests_per_staff_hour"))).cast("int"),
     )
-    .select("venue_id", "venue_name", "open_hour", "close_hour", "date", "hour", "role", "required_staff")
+    .select("venue_id", "venue_name", "park", "venue_type", "open_hour", "close_hour", "date", "hour", "role", "required_staff")
 )
 if venues.lower() != "all":
     required = required.where(F.col("venue_id").isin([v.strip() for v in venues.split(",")]))
@@ -146,7 +146,8 @@ display(spark.table(schedule_table).orderBy("venue_id", "date", "role", "shift_s
 
 # MAGIC %md
 # MAGIC ## Check coverage
-# MAGIC Scheduled staff on duty vs. required staff, by venue.
+# MAGIC Scheduled staff on duty vs. required staff for every venue, role and hour (saved as `venue_staffing_coverage`),
+# MAGIC and a summary by venue (saved as `venue_staffing_summary`).
 
 # COMMAND ----------
 
@@ -161,7 +162,12 @@ on_duty = (
     .rename(columns={"staff_count": "scheduled_staff"})
 )
 coverage = req_pdf.merge(on_duty, on=["venue_id", "date", "role", "hour"], how="left").fillna({"scheduled_staff": 0})
+coverage["scheduled_staff"] = coverage["scheduled_staff"].astype(int)
 coverage["understaffed"] = (coverage["scheduled_staff"] < coverage["required_staff"]).astype(int)
+
+coverage_table = f"{catalog}.{schema}.venue_staffing_coverage"
+(spark.createDataFrame(coverage.drop(columns=["open_hour", "close_hour"]))
+    .write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(coverage_table))
 
 solver_stats = sched_pdf.groupby("venue_id", as_index=False).agg(
     shifts=("staff_count", "sum"), solver_status=("solver_status", "first"), solve_seconds=("solve_seconds", "first")

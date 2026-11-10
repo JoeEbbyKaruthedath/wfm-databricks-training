@@ -1,15 +1,18 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 05 · Create the jobs (jobs as code)
+# MAGIC # 05 · Create the jobs and the dashboard (as code)
 # MAGIC
 # MAGIC Creates or updates the three training jobs, pointing at the notebooks in **this folder**:
 # MAGIC - **WFM training: Create seed data** runs `01`
 # MAGIC - **WFM training: Train demand forecaster** runs `02` weekly (schedule paused)
 # MAGIC - **WFM training: Nightly forecast and staff schedules** runs `03`, then `04` (schedule paused)
 # MAGIC
-# MAGIC Run it once in a new workspace. Running it again updates the jobs in place (it matches them by name).
-# MAGIC Everything here can also be done by hand in **Jobs & Pipelines → Create → Job**. This notebook just writes the
-# MAGIC same settings down as code, using the Databricks SDK that comes with every runtime.
+# MAGIC
+# MAGIC It also creates or updates the **Venue staffing plan** dashboard in your user folder, reading from your catalog and schema.
+# MAGIC
+# MAGIC Run it once in a new workspace. Running it again updates everything in place (jobs are matched by name).
+# MAGIC Everything here can also be done by hand in **Jobs & Pipelines → Create → Job** and **Dashboards**. This notebook
+# MAGIC just writes the same settings down as code, using the Databricks SDK that comes with every runtime.
 
 # COMMAND ----------
 
@@ -18,6 +21,7 @@ dbutils.widgets.text("schema", "wfm_training", "Schema")
 dbutils.widgets.text("node_type_id", "", "Node type (blank = pick 4 cores, 16 GB)")
 dbutils.widgets.text("spark_version", "", "Runtime (blank = latest ML LTS)")
 dbutils.widgets.text("notify_email", "", "Failure emails to (blank = you)")
+dbutils.widgets.text("warehouse_id", "", "SQL warehouse for the dashboard (blank = first one found)")
 
 catalog = dbutils.widgets.get("catalog").strip()
 if not catalog:
@@ -145,3 +149,41 @@ for settings in jobs:
         job_id = w.api_client.do("POST", "/api/2.2/jobs/create", body=settings)["job_id"]
         action = "created"
     print(f"{action}: {settings['name']} → {host}/jobs/{job_id}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Dashboard
+# MAGIC The dashboard definition lives in `dashboards/venue_staffing_plan.json` in this folder. Its queries use bare table
+# MAGIC names, so the catalog and schema set above decide which data it shows. Dashboards run on a SQL warehouse.
+
+# COMMAND ----------
+
+from databricks.sdk.errors import NotFound
+
+warehouse_id = dbutils.widgets.get("warehouse_id").strip()
+if not warehouse_id:
+    warehouses = list(w.warehouses.list())
+    if not warehouses:
+        raise ValueError("No SQL warehouse found. Create one, or set the warehouse_id widget.")
+    warehouse_id = warehouses[0].id
+
+definition = open(f"/Workspace{folder}/dashboards/venue_staffing_plan.json").read()
+dashboard_name = "Venue staffing plan"
+parent = f"/Users/{me}"
+data_source = {"dataset_catalog": catalog, "dataset_schema": schema}
+
+try:
+    dashboard_id = w.workspace.get_status(f"{parent}/{dashboard_name}.lvdash.json").resource_id
+    w.api_client.do("PATCH", f"/api/2.0/lakeview/dashboards/{dashboard_id}", query=data_source,
+                    body={"warehouse_id": warehouse_id, "serialized_dashboard": definition})
+    action = "updated"
+except NotFound:
+    dashboard_id = w.api_client.do("POST", "/api/2.0/lakeview/dashboards", query=data_source,
+                                   body={"display_name": dashboard_name, "warehouse_id": warehouse_id,
+                                         "parent_path": parent, "serialized_dashboard": definition})["dashboard_id"]
+    action = "created"
+
+w.api_client.do("POST", f"/api/2.0/lakeview/dashboards/{dashboard_id}/published",
+                body={"warehouse_id": warehouse_id, "embed_credentials": True})
+print(f"{action} and published: {dashboard_name} → {host}/sql/dashboardsv3/{dashboard_id}/published")
