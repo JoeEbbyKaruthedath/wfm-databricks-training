@@ -4,7 +4,8 @@
       "name": "ds_coverage",
       "displayName": "Staff needed vs. on duty (hourly)",
       "queryLines": [
-        "SELECT venue_id, venue_name, park, venue_type, date, hour, role, required_staff, scheduled_staff, understaffed\n",
+        "SELECT venue_id, venue_name, park, initcap(replace(venue_type, '_', ' ')) AS venue_type, date, hour, role,\n",
+        "       required_staff, scheduled_staff, scheduled_staff - required_staff AS extra_staff, understaffed\n",
         "FROM venue_staffing_coverage\n"
       ],
       "columns": [
@@ -12,6 +13,11 @@
           "displayName": "Staffing buffer",
           "description": "Scheduled staff-hours above what demand needs",
           "expression": "SUM(`scheduled_staff`) / SUM(`required_staff`) - 1"
+        },
+        {
+          "displayName": "Staff-hours above need",
+          "description": "Scheduled minus needed staff-hours",
+          "expression": "SUM(`scheduled_staff`) - SUM(`required_staff`)"
         }
       ]
     },
@@ -19,7 +25,7 @@
       "name": "ds_shifts",
       "displayName": "Shift schedule",
       "queryLines": [
-        "SELECT s.date, s.venue_id, s.venue_name, v.park, v.venue_type, s.role,\n",
+        "SELECT s.date, s.venue_id, s.venue_name, v.park, initcap(replace(v.venue_type, '_', ' ')) AS venue_type, s.role,\n",
         "       s.shift_start, s.shift_end, s.shift_hours, s.staff_count,\n",
         "       s.staff_count * s.shift_hours AS staff_hours,\n",
         "       CONCAT(LPAD(CAST(s.shift_start AS STRING), 2, '0'), ':00') AS start_time,\n",
@@ -40,7 +46,7 @@
         "  SELECT venue_id, date, hour, CAST(NULL AS DOUBLE) AS actual_guests, forecast_guests\n",
         "  FROM venue_demand_forecast\n",
         ")\n",
-        "SELECT d.venue_id, v.venue_name, v.park, v.venue_type, d.date, d.hour,\n",
+        "SELECT d.venue_id, v.venue_name, v.park, initcap(replace(v.venue_type, '_', ' ')) AS venue_type, d.date, d.hour,\n",
         "       date_format(d.date, 'MM-dd EEE') AS day_label, d.actual_guests, d.forecast_guests\n",
         "FROM demand d\n",
         "JOIN venues v ON v.venue_id = d.venue_id\n"
@@ -397,7 +403,7 @@
         },
         {
           "widget": {
-            "name": "needed_vs_on_duty",
+            "name": "extra_staff_heatmap",
             "queries": [
               {
                 "name": "main_query",
@@ -409,12 +415,12 @@
                       "expression": "`hour`"
                     },
                     {
-                      "name": "sum(scheduled_staff)",
-                      "expression": "SUM(`scheduled_staff`)"
+                      "name": "venue_type",
+                      "expression": "`venue_type`"
                     },
                     {
-                      "name": "sum(required_staff)",
-                      "expression": "SUM(`required_staff`)"
+                      "name": "sum(extra_staff)",
+                      "expression": "SUM(`extra_staff`)"
                     }
                   ],
                   "disaggregated": false
@@ -423,37 +429,54 @@
             ],
             "spec": {
               "version": 3,
-              "widgetType": "line",
+              "widgetType": "heatmap",
               "encodings": {
                 "x": {
                   "fieldName": "hour",
                   "scale": {
-                    "type": "quantitative"
+                    "type": "categorical"
                   },
                   "displayName": "Hour of day"
                 },
                 "y": {
+                  "fieldName": "venue_type",
                   "scale": {
-                    "type": "quantitative"
+                    "type": "categorical"
                   },
-                  "displayName": "Staff",
-                  "fields": [
-                    {
-                      "fieldName": "sum(scheduled_staff)",
-                      "displayName": "On duty"
-                    },
-                    {
-                      "fieldName": "sum(required_staff)",
-                      "displayName": "Needed"
+                  "axis": {
+                    "hideTitle": true
+                  }
+                },
+                "color": {
+                  "fieldName": "sum(extra_staff)",
+                  "displayName": "Extra staff-hours",
+                  "format": {
+                    "type": "number-plain",
+                    "decimalPlaces": {
+                      "type": "exact",
+                      "places": 0
                     }
-                  ]
+                  },
+                  "scale": {
+                    "type": "quantitative",
+                    "colorRamp": {
+                      "mode": "custom-sequential",
+                      "colors": {
+                        "start": "#FFFFFF",
+                        "end": "#E69F00"
+                      }
+                    }
+                  }
+                },
+                "label": {
+                  "show": true
                 }
               },
               "frame": {
                 "showTitle": true,
-                "title": "Staff on duty vs. needed, by hour",
+                "title": "When the extra staff-hours happen",
                 "showDescription": true,
-                "description": "Summed over the selected days and venues. The gap mid-afternoon is shifts bridging the lunch and dinner peaks."
+                "description": "Staff-hours scheduled above need, by venue type and hour, over the selected days. Shifts come in 4-, 6- and 8-hour blocks, so the extra hours land between demand peaks."
               }
             }
           },
@@ -539,16 +562,20 @@
                   "datasetName": "ds_coverage",
                   "fields": [
                     {
+                      "name": "venue_type",
+                      "expression": "`venue_type`"
+                    },
+                    {
+                      "name": "measure(Staff-hours above need)",
+                      "expression": "MEASURE(`Staff-hours above need`)"
+                    },
+                    {
+                      "name": "measure(Staffing buffer)",
+                      "expression": "MEASURE(`Staffing buffer`)"
+                    },
+                    {
                       "name": "venue_name",
                       "expression": "`venue_name`"
-                    },
-                    {
-                      "name": "sum(required_staff)",
-                      "expression": "SUM(`required_staff`)"
-                    },
-                    {
-                      "name": "sum(scheduled_staff)",
-                      "expression": "SUM(`scheduled_staff`)"
                     }
                   ],
                   "disaggregated": false
@@ -556,39 +583,69 @@
               }
             ],
             "spec": {
+              "frame": {
+                "showTitle": true,
+                "showDescription": true,
+                "title": {
+                  "value": "Staffing buffer by venue (scheduled vs. needed staff-hours)",
+                  "fields": []
+                },
+                "description": {
+                  "value": "Scheduled staff-hours above need, as a % of need. Attractions run tight; merch and table service carry more slack. Hover for the gap in staff-hours.",
+                  "fields": []
+                }
+              },
               "version": 3,
               "widgetType": "bar",
               "encodings": {
                 "x": {
+                  "fieldName": "measure(Staffing buffer)",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 1
+                    }
+                  },
+                  "displayName": "Staffing buffer",
                   "scale": {
                     "type": "quantitative"
-                  },
-                  "displayName": "Staff-hours",
-                  "fields": [
-                    {
-                      "fieldName": "sum(scheduled_staff)",
-                      "displayName": "Scheduled"
-                    },
-                    {
-                      "fieldName": "sum(required_staff)",
-                      "displayName": "Needed"
-                    }
-                  ]
+                  }
                 },
                 "y": {
                   "fieldName": "venue_name",
+                  "displayName": "Venue",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "venue_type",
+                  "displayName": "Venue type",
                   "scale": {
                     "type": "categorical"
-                  },
-                  "displayName": "Venue"
-                }
+                  }
+                },
+                "extra": [
+                  {
+                    "fieldName": "measure(Staff-hours above need)",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "max",
+                        "places": 0
+                      }
+                    },
+                    "displayName": "Scheduled minus needed staff-hours"
+                  }
+                ]
               },
-              "mark": {
-                "layout": "group"
-              },
-              "frame": {
-                "showTitle": true,
-                "title": "Scheduled vs. needed staff-hours, by venue"
+              "data": {
+                "queryName": "main_query"
               }
             }
           },
