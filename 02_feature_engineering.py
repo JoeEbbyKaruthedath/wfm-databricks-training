@@ -15,16 +15,16 @@
 
 # COMMAND ----------
 
-dbutils.widgets.text("catalog", "", "Catalog")
-dbutils.widgets.text("schema", "wfm_training", "Schema")
+from wfm_utils import DEFAULT_CATALOG, DEFAULT_SCHEMA
+
+dbutils.widgets.text("catalog", DEFAULT_CATALOG, "Catalog")
+dbutils.widgets.text("schema", DEFAULT_SCHEMA, "Schema")
 dbutils.widgets.dropdown("purpose", "training", ["training", "scoring"], "Purpose")
 dbutils.widgets.text("forecast_days", "7", "Scoring: days to forecast")
 dbutils.widgets.text("start_date", "", "Scoring: first date (blank = tomorrow)")
 
-catalog = dbutils.widgets.get("catalog").strip()
-if not catalog:
-    raise ValueError("Set the catalog widget to a Unity Catalog catalog where you can create a schema.")
-schema = dbutils.widgets.get("schema")
+catalog = dbutils.widgets.get("catalog").strip() or DEFAULT_CATALOG
+schema = dbutils.widgets.get("schema").strip() or DEFAULT_SCHEMA
 purpose = dbutils.widgets.get("purpose")
 forecast_days = int(dbutils.widgets.get("forecast_days"))
 start_date = dbutils.widgets.get("start_date").strip()

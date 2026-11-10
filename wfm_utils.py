@@ -9,6 +9,11 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
+# Defaults for running the notebooks by hand. The pipelines get their catalog and schema from the bundle
+# (databricks.yml), so change these only for interactive runs in your workspace.
+DEFAULT_CATALOG = "classic_stable_catalog"
+DEFAULT_SCHEMA = "wfm_training"
+
 # Columns the demand model is trained on (same order everywhere).
 FEATURES = [
     "base_demand",

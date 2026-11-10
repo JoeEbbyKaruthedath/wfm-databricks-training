@@ -12,18 +12,18 @@
 
 # COMMAND ----------
 
-dbutils.widgets.text("catalog", "", "Catalog")
-dbutils.widgets.text("schema", "wfm_training", "Schema")
+from wfm_utils import DEFAULT_CATALOG, DEFAULT_SCHEMA
+
+dbutils.widgets.text("catalog", DEFAULT_CATALOG, "Catalog")
+dbutils.widgets.text("schema", DEFAULT_SCHEMA, "Schema")
 dbutils.widgets.text("model_name", "venue_demand_forecaster", "Model name")
 dbutils.widgets.text("n_estimators", "300", "XGBoost: trees")
 dbutils.widgets.text("max_depth", "6", "XGBoost: max depth")
 dbutils.widgets.text("learning_rate", "0.1", "XGBoost: learning rate")
 dbutils.widgets.text("holdout_weeks", "8", "Holdout weeks")
 
-catalog = dbutils.widgets.get("catalog").strip()
-if not catalog:
-    raise ValueError("Set the catalog widget to a Unity Catalog catalog where you can create a schema.")
-schema = dbutils.widgets.get("schema")
+catalog = dbutils.widgets.get("catalog").strip() or DEFAULT_CATALOG
+schema = dbutils.widgets.get("schema").strip() or DEFAULT_SCHEMA
 model_name = dbutils.widgets.get("model_name")
 n_estimators = int(dbutils.widgets.get("n_estimators"))
 max_depth = int(dbutils.widgets.get("max_depth"))

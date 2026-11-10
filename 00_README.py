@@ -42,7 +42,8 @@
 # MAGIC %md
 # MAGIC ## Before you start
 # MAGIC You need:
-# MAGIC - A Unity Catalog catalog where you can create a schema. Set it in the `catalog` widget at the top of each notebook.
+# MAGIC - A Unity Catalog catalog where you can create a schema. Set it once as `DEFAULT_CATALOG` in `wfm_utils.py`;
+# MAGIC   every notebook uses it, so **Run all** works with no input. You can still override it in the `catalog` widget.
 # MAGIC - Permission to create personal compute
 # MAGIC
 # MAGIC **Get the training into your workspace as a Git folder** (skip this if you already see it):
@@ -81,7 +82,7 @@
 # MAGIC %md
 # MAGIC ## Step 2 · Unity Catalog and the source data
 # MAGIC **Do**
-# MAGIC 1. Open `01_setup_and_data`, attach it to your cluster, set the `catalog` widget, and click **Run all**.
+# MAGIC 1. Open `01_setup_and_data`, attach it to your cluster, and click **Run all**.
 # MAGIC 2. Open **Catalog** and go to `<catalog>.wfm_training`.
 # MAGIC
 # MAGIC **You should see:**

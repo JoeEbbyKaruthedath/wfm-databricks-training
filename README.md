@@ -45,6 +45,8 @@ defaults from the bundle variables in `databricks.yml` (`catalog`, `schema`, `mo
 4. Open `00_README` and follow the steps.
 
 You need a Unity Catalog catalog where you can create a schema, and permission to create personal compute.
+Set your catalog as `DEFAULT_CATALOG` in `wfm_utils.py` (used when you run the notebooks by hand) and as `catalog`
+in `databricks.yml` (used by the pipelines).
 The notebooks run on Databricks Runtime ML (LTS).
 
 ## Deploy the bundle

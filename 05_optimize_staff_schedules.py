@@ -16,18 +16,18 @@
 
 # COMMAND ----------
 
-dbutils.widgets.text("catalog", "", "Catalog")
-dbutils.widgets.text("schema", "wfm_training", "Schema")
+from wfm_utils import DEFAULT_CATALOG, DEFAULT_SCHEMA
+
+dbutils.widgets.text("catalog", DEFAULT_CATALOG, "Catalog")
+dbutils.widgets.text("schema", DEFAULT_SCHEMA, "Schema")
 dbutils.widgets.text("venues", "all", "Venues (all, or comma-separated IDs)")
 dbutils.widgets.text("service_level", "1.0", "Service level (1.1 = 10% more staff)")
 dbutils.widgets.text("min_shift_hours", "4", "Shortest shift (hours)")
 dbutils.widgets.text("max_shift_hours", "8", "Longest shift (hours)")
 dbutils.widgets.text("solver_time_limit_s", "20", "Solver time limit per venue (s)")
 
-catalog = dbutils.widgets.get("catalog").strip()
-if not catalog:
-    raise ValueError("Set the catalog widget to a Unity Catalog catalog where you can create a schema.")
-schema = dbutils.widgets.get("schema")
+catalog = dbutils.widgets.get("catalog").strip() or DEFAULT_CATALOG
+schema = dbutils.widgets.get("schema").strip() or DEFAULT_SCHEMA
 venues = dbutils.widgets.get("venues").strip()
 service_level = float(dbutils.widgets.get("service_level"))
 min_shift = int(dbutils.widgets.get("min_shift_hours"))

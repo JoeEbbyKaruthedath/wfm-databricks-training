@@ -21,14 +21,14 @@
 
 # COMMAND ----------
 
-dbutils.widgets.text("catalog", "", "Catalog")
-dbutils.widgets.text("schema", "wfm_training", "Schema")
+from wfm_utils import DEFAULT_CATALOG, DEFAULT_SCHEMA
+
+dbutils.widgets.text("catalog", DEFAULT_CATALOG, "Catalog")
+dbutils.widgets.text("schema", DEFAULT_SCHEMA, "Schema")
 dbutils.widgets.text("history_days", "730", "Days of history")
 
-catalog = dbutils.widgets.get("catalog").strip()
-if not catalog:
-    raise ValueError("Set the catalog widget to a Unity Catalog catalog where you can create a schema.")
-schema = dbutils.widgets.get("schema")
+catalog = dbutils.widgets.get("catalog").strip() or DEFAULT_CATALOG
+schema = dbutils.widgets.get("schema").strip() or DEFAULT_SCHEMA
 history_days = int(dbutils.widgets.get("history_days"))
 print(f"Writing to {catalog}.{schema}")
 
